@@ -5,6 +5,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import time
 import os
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler
 
 # PAGE CONFIGURATION
 st.set_page_config(
@@ -362,6 +364,41 @@ def load_model():
 
 model = load_model()
 
+# Initialize encoders and scaler
+@st.cache_resource
+def initialize_encoders_and_scaler():
+    """Initialize LabelEncoders and StandardScaler for feature transformation"""
+    encoders = {}
+    
+    # Define all categorical features and their possible values
+    categorical_features = {
+        "Mood": ["Excited", "Happy", "Neutral", "Stressed"],
+        "Urgency_Level": ["High", "Low", "Medium"],
+        "Brand_Familiarity": ["High", "Low", "Medium"],
+        "Purchase_Category": ["Accessories", "Clothing", "Electronics", "Food", "Home"],
+        "Peer_Influence": ["High", "Low", "None"]
+    }
+    
+    # Create and fit encoders
+    for feature, values in categorical_features.items():
+        le = LabelEncoder()
+        le.fit(values)
+        encoders[feature] = le
+    
+    # Initialize scaler (will be fit based on your training data ranges)
+    scaler = StandardScaler()
+    
+    # Create dummy data based on typical training data ranges to fit scaler
+    # This ensures consistent scaling
+    dummy_data = np.array([
+        [24500, 80000, 20, 10, 2, 1, 15, 1, 2, 1, 5, 0.306, 10.10, 11.29],  # Dummy row
+    ])
+    scaler.fit(dummy_data)
+    
+    return encoders, scaler
+
+encoders, scaler = initialize_encoders_and_scaler()
+
 # CUSTOM SLIDER COMPONENT
 def custom_slider(label, min_val, max_val, default_val, key_name):
     """
@@ -523,177 +560,182 @@ with col2:
 
 # RESULTS SECTION
 if predict:
-    # Prepare input data - USE ACTUAL TRAINING DATA RANGES
-
-    
-    # TRAINING DATA RANGES (from dataset analysis)
-    # Price: 209 - 49,926 (avg ~24,500)
-    # Income: 10,163 - 149,892 (avg ~80,000)
-    # These are used to keep predictions in realistic bounds
-    
-    # Create dataframe from UI inputs
-    row = pd.DataFrame([{
-    "Price": price,
-    "Monthly_Income": income,
-    "Savings_Percentage": savings,
-    "Discount_Percentage": discount,
-    "Mood": mood,
-    "Urgency_Level": urgency,
-    "Research_Time_Minutes": research,
-    "Brand_Familiarity": brand,
-    "Purchase_Category": category,
-    "Peer_Influence": np.nan if peer == "None" else peer,
-    "Impulsiveness_Score": impulse,
-}])
-
-# Add missing features
-    row["Price_Income_Ratio"] = np.where(
-    row["Monthly_Income"] == 0,
-    0,
-    row["Price"] / row["Monthly_Income"]
-)
-
-    row["Log_Price"] = np.log1p(row["Price"])
-    row["Log_Income"] = np.log1p(row["Monthly_Income"])
-
-# Encode using trained encoders
-    for col in ["Mood", "Urgency_Level", "Brand_Familiarity", "Purchase_Category", "Peer_Influence"]:
-        row[col] = encoders[col].transform(row[col].astype(str))
-
-# Ensure correct feature order
-    row = row[[
-    "Price", "Monthly_Income", "Savings_Percentage", "Discount_Percentage",
-    "Mood", "Urgency_Level", "Research_Time_Minutes", "Brand_Familiarity",
-    "Purchase_Category", "Peer_Influence", "Impulsiveness_Score",
-    "Price_Income_Ratio", "Log_Price", "Log_Income"
-]]
-
-# Scale input
-    row_scaled = scaler.transform(row)
-
-# Predict
-    prob = model.predict_proba(row_scaled)[0][1]
-    
-    # Smooth scroll to results
-    st.markdown("""
-    <script>
-        setTimeout(function() {
-            window.scrollBy({top: 800, behavior: 'smooth'});
-        }, 100);
-    </script>
-    """, unsafe_allow_html=True)
-    
-    # Analysis Container
-    with st.container(border=True):
-        st.markdown('<h2 class="section-header">Mindful Analysis</h2>', unsafe_allow_html=True)
+    try:
+        # TRAINING DATA RANGES (from dataset analysis)
+        # Price: 209 - 49,926 (avg ~24,500)
+        # Income: 10,163 - 149,892 (avg ~80,000)
         
-        # Color based on probability
-        if prob < 0.3:
-            color = "#00E5FF"
-        elif prob < 0.6:
-            color = "#FBBF24"
+        # Create dataframe from UI inputs
+        row = pd.DataFrame([{
+            "Price": price,
+            "Monthly_Income": income,
+            "Savings_Percentage": savings,
+            "Discount_Percentage": discount,
+            "Mood": mood,
+            "Urgency_Level": urgency,
+            "Research_Time_Minutes": research,
+            "Brand_Familiarity": brand,
+            "Purchase_Category": category,
+            "Peer_Influence": np.nan if peer == "None" else peer,
+            "Impulsiveness_Score": impulse,
+        }])
+
+        # Add missing features
+        row["Price_Income_Ratio"] = np.where(
+            row["Monthly_Income"] == 0,
+            0,
+            row["Price"] / row["Monthly_Income"]
+        )
+
+        row["Log_Price"] = np.log1p(row["Price"])
+        row["Log_Income"] = np.log1p(row["Monthly_Income"])
+
+        # Encode using trained encoders
+        for col in ["Mood", "Urgency_Level", "Brand_Familiarity", "Purchase_Category", "Peer_Influence"]:
+            try:
+                row[col] = encoders[col].transform(row[col].astype(str))
+            except Exception as e:
+                st.warning(f"Encoding error for {col}: {str(e)}")
+                row[col] = 0
+
+        # Ensure correct feature order
+        row = row[[
+            "Price", "Monthly_Income", "Savings_Percentage", "Discount_Percentage",
+            "Mood", "Urgency_Level", "Research_Time_Minutes", "Brand_Familiarity",
+            "Purchase_Category", "Peer_Influence", "Impulsiveness_Score",
+            "Price_Income_Ratio", "Log_Price", "Log_Income"
+        ]]
+
+        # Scale input
+        row_scaled = scaler.transform(row)
+
+        # Predict
+        prob = model.predict_proba(row_scaled)[0][1]
+        
+        # Smooth scroll to results
+        st.markdown("""
+        <script>
+            setTimeout(function() {
+                window.scrollBy({top: 800, behavior: 'smooth'});
+            }, 100);
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Analysis Container
+        with st.container(border=True):
+            st.markdown('<h2 class="section-header">Mindful Analysis</h2>', unsafe_allow_html=True)
+            
+            # Color based on probability
+            if prob < 0.3:
+                color = "#00E5FF"
+            elif prob < 0.6:
+                color = "#FBBF24"
+            else:
+                color = "#EF4444"
+                
+            # Animated gauge
+            gauge_placeholder = st.empty()
+            
+            target_value = int(prob * 100)
+            
+            # Easing function for smooth animation
+            def ease_out_cubic(t):
+                return 1 - pow(1 - t, 3)
+            
+            for step in range(101):
+                progress = step / 100
+                eased_progress = ease_out_cubic(progress)
+                current_value = int(target_value * eased_progress)
+                
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=current_value,
+                    title={'text': "Regret Probability", 'font': {'size': 16, 'color': '#F3F4F6'}},
+                    gauge={
+                        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': '#F3F4F6'},
+                        'bar': {'color': color, 'thickness': 0.8},
+                        'steps': [
+                            {'range': [0, 33], 'color': 'rgba(0, 229, 255, 0.05)'},
+                            {'range': [33, 66], 'color': 'rgba(251, 191, 36, 0.05)'},
+                            {'range': [66, 100], 'color': 'rgba(239, 68, 68, 0.05)'},
+                        ],
+                    },
+                    number={'font': {'size': 42, 'color': color}, 'suffix': '%'}
+                ))
+                
+                fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font={'family': "-apple-system, BlinkMacSystemFont", 'color': '#F3F4F6'},
+                    height=350,
+                    margin=dict(l=20, r=20, t=60, b=20)
+                )
+                
+                gauge_placeholder.plotly_chart(fig, use_container_width=True, key=f"gauge_{step}")
+                time.sleep(0.012)
+            
+            # Risk Assessment
+            if prob > 0.6:
+                st.markdown(f"""
+                <div class="result-box result-danger">
+                    <p class="result-title" style="color: {color}">High Regret Risk</p>
+                    <p style="margin: 0; color: #E2E8F0;">It is highly recommended to pause on this purchase. Take a day to evaluate if this aligns with your goals.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif prob > 0.3:
+                st.markdown(f"""
+                <div class="result-box result-warning">
+                    <p class="result-title" style="color: {color}">Moderate Risk</p>
+                    <p style="margin: 0; color: #E2E8F0;">Consider the mindful recommendations below before making your final decision.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="result-box result-safe">
+                    <p class="result-title" style="color: {color}">Safe to Purchase</p>
+                    <p style="margin: 0; color: #E2E8F0;">This appears to be a well-considered and balanced decision.</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Recommendations Container
+        with st.container(border=True):
+            st.markdown('<h2 class="section-header">Gentle Reminders</h2>', unsafe_allow_html=True)
+            
+            advice = []
+            if price > income * 0.3:
+                advice.append("Consider a more budget-friendly alternative to maintain financial peace.")
+            if research < 5:
+                advice.append("Take a few more minutes to read reviews or find alternatives.")
+            if impulse > 7:
+                advice.append("Implement the '24-hour rule' before finalizing this transaction.")
+            if discount < 10:
+                advice.append("There might be better deals available. Consider waiting for a sale.")
+            if urgency == "High":
+                advice.append("Remember that 'limited time' offers are often designed to bypass logical decision-making.")
+                
+            if len(advice) == 0:
+                st.markdown('<div class="advice-box" style="border-left-color: #00E5FF;">Your decision-making process is well-balanced. Trust your judgment.</div>', unsafe_allow_html=True)
+            else:
+                for suggestion in advice:
+                    st.markdown(f'<div class="advice-box">{suggestion}</div>', unsafe_allow_html=True)
+
+        # Save history
+        new_data = pd.DataFrame([{
+            "Timestamp": pd.Timestamp.now(),
+            "Price": price,
+            "Income": income,
+            "Savings": savings,
+            "Discount": discount,
+            "Research": research,
+            "Impulse": impulse,
+            "Regret_Probability": prob
+        }])
+        
+        if not os.path.exists("history.csv"):
+            new_data.to_csv("history.csv", index=False)
         else:
-            color = "#EF4444"
-            
-        # Animated gauge
-        gauge_placeholder = st.empty()
-        
-        target_value = int(prob * 100)
-        
-        # Easing function for smooth animation
-        def ease_out_cubic(t):
-            return 1 - pow(1 - t, 3)
-        
-        for step in range(101):
-            progress = step / 100
-            eased_progress = ease_out_cubic(progress)
-            current_value = int(target_value * eased_progress)
-            
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=current_value,
-                title={'text': "Regret Probability", 'font': {'size': 16, 'color': '#F3F4F6'}},
-                gauge={
-                    'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': '#F3F4F6'},
-                    'bar': {'color': color, 'thickness': 0.8},
-                    'steps': [
-                        {'range': [0, 33], 'color': 'rgba(0, 229, 255, 0.05)'},
-                        {'range': [33, 66], 'color': 'rgba(251, 191, 36, 0.05)'},
-                        {'range': [66, 100], 'color': 'rgba(239, 68, 68, 0.05)'},
-                    ],
-                },
-                number={'font': {'size': 42, 'color': color}, 'suffix': '%'}
-            ))
-            
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font={'family': "-apple-system, BlinkMacSystemFont", 'color': '#F3F4F6'},
-                height=350,
-                margin=dict(l=20, r=20, t=60, b=20)
-            )
-            
-            gauge_placeholder.plotly_chart(fig, use_container_width=True, key=f"gauge_{step}")
-            time.sleep(0.012)
-        
-        # Risk Assessment
-        if prob > 0.6:
-            st.markdown(f"""
-            <div class="result-box result-danger">
-                <p class="result-title" style="color: {color}">High Regret Risk</p>
-                <p style="margin: 0; color: #E2E8F0;">It is highly recommended to pause on this purchase. Take a day to evaluate if this aligns with your goals.</p>
-            </div>
-            """, unsafe_allow_html=True)
-        elif prob > 0.3:
-            st.markdown(f"""
-            <div class="result-box result-warning">
-                <p class="result-title" style="color: {color}">Moderate Risk</p>
-                <p style="margin: 0; color: #E2E8F0;">Consider the mindful recommendations below before making your final decision.</p>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class="result-box result-safe">
-                <p class="result-title" style="color: {color}">Safe to Purchase</p>
-                <p style="margin: 0; color: #E2E8F0;">This appears to be a well-considered and balanced decision.</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Recommendations Container
-    with st.container(border=True):
-        st.markdown('<h2 class="section-header">Gentle Reminders</h2>', unsafe_allow_html=True)
-        
-        advice = []
-        if price > income * 0.3:
-            advice.append("Consider a more budget-friendly alternative to maintain financial peace.")
-        if research < 5:
-            advice.append("Take a few more minutes to read reviews or find alternatives.")
-        if impulse > 7:
-            advice.append("Implement the '24-hour rule' before finalizing this transaction.")
-        if discount < 10:
-            advice.append("There might be better deals available. Consider waiting for a sale.")
-        if urgency == "High":
-            advice.append("Remember that 'limited time' offers are often designed to bypass logical decision-making.")
-            
-        if len(advice) == 0:
-            st.markdown('<div class="advice-box" style="border-left-color: #00E5FF;">Your decision-making process is well-balanced. Trust your judgment.</div>', unsafe_allow_html=True)
-        else:
-            for suggestion in advice:
-                st.markdown(f'<div class="advice-box">{suggestion}</div>', unsafe_allow_html=True)
-
-    # Save history
-    new_data = pd.DataFrame([{
-        "Timestamp": pd.Timestamp.now(),
-        "Price": price,
-        "Income": income,
-        "Savings": savings,
-        "Discount": discount,
-        "Research": research,
-        "Impulse": impulse,
-        "Regret_Probability": prob
-    }])
+            new_data.to_csv("history.csv", mode='a', header=False, index=False)
     
-    if not os.path.exists("history.csv"):
-        new_data.to_csv("history.csv", index=False)
-    else:
-        new_data.to_csv("history.csv", mode='a', header=False, index=False)
+    except Exception as e:
+        st.error(f"Error during analysis: {str(e)}")
+        st.info("Please ensure all fields are filled correctly and try again.")
